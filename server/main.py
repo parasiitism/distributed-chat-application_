@@ -1,6 +1,14 @@
+import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import redis
+import threading
 
 app = FastAPI()
+
+# Redis connection
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+pubsub = redis_client.pubsub()
+pubsub.subscribe("chat")
 
 class ConnectionManager:
     def __init__(self):
@@ -26,10 +34,19 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            message = await websocket.receive_text()
-            print("Received:", message)
-            await manager.broadcast(message)
+            data = await websocket.receive_text()
+            print("Publishing:", data)
+            redis_client.publish("chat", data)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         print("Client disconnected")
+
+#Background Redis listener
+def redis_listener():
+    for message in pubsub.listen():
+        if message["type"] == "message":
+            data = message["data"]
+            asyncio.run(manager.broadcast(data))
+
+threading.Thread(target=redis_listener, daemon=True).start()
